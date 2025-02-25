@@ -1,0 +1,13 @@
+{
+  "name": "snake-game",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "serve": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.0",
+    "vite": "^4.3.0"
+  }
+} 
