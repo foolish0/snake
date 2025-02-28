@@ -59,13 +59,15 @@
 
 1. 克隆仓库
 
-bash
+```bash
 git clone https://github.com/yourusername/snake-game.git
 cd snake-game
+```
 
 2. 安装依赖
-bash
+```bash
 npm install
+```
 
 3. 生成游戏资源
 ```bash
