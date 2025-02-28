@@ -226,7 +226,7 @@ export class Game {
   private handleKeyDown(event: KeyboardEvent): void {
     // 在菜单状态下的按键处理
     if (this.gameState === 'menu') {
-      switch (event.key) {
+      switch (event.key.toLowerCase()) {
         case '1':
           this.setDifficulty(GameDifficulty.EASY);
           this.startGame();
@@ -240,7 +240,6 @@ export class Game {
           this.startGame();
           break;
         case 's':
-        case 'S':
           this.gameState = 'shop';
           break;
         case 'o':
@@ -259,13 +258,11 @@ export class Game {
       // 数字键选择购买皮肤
       if (event.key >= '1' && event.key <= '3') {
         const skinIndex = parseInt(event.key) - 1;
-        const availableSkins = ['blue', 'gold', 'rainbow'];
+        const skins = ['blue', 'gold', 'rainbow'];
         const prices = [100, 300, 500];
         
-        if (skinIndex < availableSkins.length) {
-          const skin = availableSkins[skinIndex];
-          const price = prices[skinIndex];
-          this.buySkin(skin, price);
+        if (skinIndex >= 0 && skinIndex < skins.length) {
+          this.buySkin(skins[skinIndex], prices[skinIndex]);
         }
       }
       // 使用皮肤
@@ -287,11 +284,17 @@ export class Game {
       if (event.key === 'Escape' || event.key === 'b' || event.key === 'B') {
         this.gameState = 'menu';
       }
-      if (event.key === 's' || event.key === 'S') {
+      if (event.key === 'v' || event.key === 'V') {
         this.toggleSound(!this.soundEnabled);
       }
       if (event.key === 'm' || event.key === 'M') {
         this.toggleMusic(!this.musicEnabled);
+      }
+      if (event.key === 's' || event.key === 'S') {
+        // 切换到下一个拥有的皮肤
+        const currentIndex = this.ownedSkins.indexOf(this.currentSkin);
+        const nextIndex = (currentIndex + 1) % this.ownedSkins.length;
+        this.changeSkin(this.ownedSkins[nextIndex]);
       }
       return;
     }
@@ -461,6 +464,7 @@ export class Game {
     this.resetGame();
     this.gameState = 'playing';
     this.playBGM();
+    this.addGameStartEffect();
   }
 
   private gameLoop(currentTime: number): void {
@@ -489,16 +493,14 @@ export class Game {
   private updateEffects(deltaTime: number): void {
     this.effects = this.effects.filter(effect => {
       effect.elapsed += deltaTime;
-      const progress = Math.min(1, effect.elapsed / effect.duration);
+      const progress = effect.elapsed / effect.duration;
       
-      effect.onUpdate(this.easeInOut(progress));
-      
-      return progress < 1;
+      if (progress <= 1) {
+        effect.onUpdate(progress);
+        return true;
+      }
+      return false;
     });
-  }
-
-  private easeInOut(t: number): number {
-    return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
   }
 
   private moveSnake(): void {
@@ -533,17 +535,24 @@ export class Game {
       this.score += scoreGained;
       
       // 增加金币
-      this.currency += Math.ceil(scoreGained / 10);
+      const coinsGained = Math.ceil(scoreGained / 10);
+      this.currency += coinsGained;
       this.saveCurrency();
       
       this.playSound('eat');
       this.generateFood();
+      
+      // 添加特效
       this.addScoreEffect(this.food, scoreGained);
+      this.addCoinEffect(this.food, coinsGained);
       
       // 蛇身体增长，不需要删除尾部
     } else {
       // 没吃到食物，删除尾部
       this.snakeSegments.pop();
+      if (Math.random() < 0.3) { // 30%几率播放移动音效
+        this.playSound('move');
+      }
     }
   }
 
@@ -766,7 +775,7 @@ export class Game {
     this.ctx.fillStyle = 'white';
     this.ctx.font = '20px Arial';
     this.ctx.textAlign = 'left';
-    this.ctx.fillText('S. 音效', this.canvas.width / 2 - 140, 150);
+    this.ctx.fillText('V. 音效', this.canvas.width / 2 - 140, 150);
     
     this.ctx.textAlign = 'right';
     this.ctx.fillStyle = this.soundEnabled ? '#00FF00' : '#FF0000';
@@ -783,6 +792,17 @@ export class Game {
     this.ctx.textAlign = 'right';
     this.ctx.fillStyle = this.musicEnabled ? '#00FF00' : '#FF0000';
     this.ctx.fillText(this.musicEnabled ? '开启' : '关闭', this.canvas.width / 2 + 140, 210);
+    
+    // 添加皮肤选择
+    this.ctx.fillStyle = 'rgba(50, 50, 50, 0.5)';
+    this.ctx.fillRect(this.canvas.width / 2 - 150, 240, 300, 50);
+
+    this.ctx.fillStyle = 'white';
+    this.ctx.textAlign = 'left';
+    this.ctx.fillText('S. 切换皮肤', this.canvas.width / 2 - 140, 270);
+
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText(this.currentSkin, this.canvas.width / 2 + 140, 270);
     
     // 绘制返回按钮
     this.ctx.fillStyle = 'rgba(50, 50, 50, 0.5)';
@@ -826,21 +846,53 @@ export class Game {
 
   private drawSnake(): void {
     this.snakeSegments.forEach((segment, index) => {
-      if (index === 0) {
-        // 蛇头
-        this.ctx.fillStyle = GameConfig.COLORS.SNAKE_HEAD;
+      const texture = this.skinTextures[this.currentSkin];
+      if (texture && texture.complete) {
+        // 使用皮肤纹理
+        const frameSize = texture.width / 3; // 每个方向的帧数
+        const direction = this.getSegmentDirection(index);
+        const frame = Math.floor(Date.now() / GameConfig.SKINS.ANIMATION_SPEED) % 3;
+        
+        this.ctx.drawImage(
+          texture,
+          frame * frameSize,
+          direction * frameSize,
+          frameSize,
+          frameSize,
+          segment.x * GameConfig.CELL_SIZE,
+          segment.y * GameConfig.CELL_SIZE,
+          GameConfig.CELL_SIZE,
+          GameConfig.CELL_SIZE
+        );
       } else {
-        // 蛇身
-        this.ctx.fillStyle = GameConfig.COLORS.SNAKE_BODY;
+        // 降级为普通渲染
+        this.ctx.fillStyle = index === 0 ? 
+          GameConfig.COLORS.SNAKE_HEAD : 
+          GameConfig.COLORS.SNAKE_BODY;
+        this.ctx.fillRect(
+          segment.x * GameConfig.CELL_SIZE,
+          segment.y * GameConfig.CELL_SIZE,
+          GameConfig.CELL_SIZE,
+          GameConfig.CELL_SIZE
+        );
       }
-      
-      this.ctx.fillRect(
-        segment.x * GameConfig.CELL_SIZE,
-        segment.y * GameConfig.CELL_SIZE,
-        GameConfig.CELL_SIZE,
-        GameConfig.CELL_SIZE
-      );
     });
+  }
+
+  private getSegmentDirection(index: number): number {
+    if (index >= this.snakeSegments.length) return 0;
+    
+    const current = this.snakeSegments[index];
+    const next = index === 0 ? 
+      { x: current.x + this.direction.x, y: current.y + this.direction.y } :
+      this.snakeSegments[index - 1];
+    
+    // 计算方向（0:上, 1:右, 2:下, 3:左）
+    if (next.y < current.y) return 0;
+    if (next.x > current.x) return 1;
+    if (next.y > current.y) return 2;
+    if (next.x < current.x) return 3;
+    return 1; // 默认朝右
   }
 
   private addScoreEffect(position: Vector2, score: number): void {
@@ -882,6 +934,46 @@ export class Game {
           centerX, 
           centerY - progress * 50
         );
+      }
+    };
+    
+    this.effects.push(effect);
+  }
+
+  private addCoinEffect(position: Vector2, coins: number): void {
+    const effect: Effect = {
+      position: { ...position },
+      duration: 1500,
+      elapsed: 0,
+      onUpdate: (progress: number) => {
+        this.ctx.fillStyle = `rgba(255, 215, 0, ${1 - progress})`;
+        this.ctx.font = '14px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText(
+          `+${coins} ${GameConfig.SHOP.CURRENCY_NAME}`, 
+          position.x * GameConfig.CELL_SIZE + GameConfig.CELL_SIZE / 2, 
+          (position.y - progress * 2 - 0.5) * GameConfig.CELL_SIZE
+        );
+      }
+    };
+    
+    this.effects.push(effect);
+  }
+
+  private addGameStartEffect(): void {
+    const centerX = this.canvas.width / 2;
+    const centerY = this.canvas.height / 2;
+    
+    const effect: Effect = {
+      position: { x: centerX / GameConfig.CELL_SIZE, y: centerY / GameConfig.CELL_SIZE },
+      duration: 1000,
+      elapsed: 0,
+      onUpdate: (progress: number) => {
+        const size = (1 - progress) * 100;
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${1 - progress})`;
+        this.ctx.font = `${size}px Arial`;
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('开始!', centerX, centerY);
       }
     };
     
